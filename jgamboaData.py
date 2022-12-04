@@ -1,106 +1,184 @@
-import streamlit as st
+import streamlit as st 
 import pandas as pd
 import numpy as np
-import pydeck as pdk
-import plotly.express as px
+import gdown
+import os
+import plotly.express as px 
+from datetime import datetime
 
-DATA_URL = (
-    "C:\\Users\\gamboa\\PycharmProjects\\jgamboaData\\dataset\\Motor_Vehicle_Collisions_-_Crashes.csv"
+
+
+st.title('Fallecidos por COVID-19')
+
+
+# id = 1dSRlbtutz10Lgb4wiYPcWaK3w5QMUH8O
+@st.experimental_memo
+def download_data():
+    #https://drive.google.com/uc?id=YOURFILEID\
+    url = "https://drive.google.com/uc?id=1dSRlbtutz10Lgb4wiYPcWaK3w5QMUH8O"
+    output = 'data.csv'
+    gdown.download(url,output,quiet = False)
+
+download_data()
+#vamos a sacar el primer millon de datos:
+data = pd.read_csv('data.csv', sep = ';', parse_dates= ['FECHA_CORTE', 'FECHA_FALLECIMIENTO'])
+data = data[["FECHA_CORTE","FECHA_FALLECIMIENTO","EDAD_DECLARADA","SEXO", "CLASIFICACION_DEF", "DEPARTAMENTO", "PROVINCIA", "DISTRITO", "UBIGEO", "UUID"]]
+#data.at[20221116,"CLASIFICACION_DEF"]="Criterio Virologico"
+#data["CLASIFICACION_DEF"[data.rename({"Criterio virolÃƒÂ³gico":"Criterio virologico"})]]
+#data.replace({"Criterio virolÃƒÂ³gico":"Criterio virologico"})
+
+#st.write(data["CLASIFICACION_DEF"].unique())
+data["CLASIFICACION_DEF"] = data.CLASIFICACION_DEF.map(
+        {"Criterio SINADEF":"Criterio SINADEF",
+        "Criterio virolÃ³gico":"Criterio virológico",
+        "Criterio serolÃ³gico":"Criterio serológico",
+        "Criterio investigaciÃ³n EpidemiolÃ³gica":"Criterio investigación epidemiológica",
+        "Criterio clÃ­nico":"Criterio clínico",
+        "Criterio radiolÃ³gico":"Criterio radiológico",
+        "Criterio nexo epidemiolÃ³gico":"Criterio nexo epidemiológico"})
+st.write(data)
+
+#Crear un selector de departamento:
+departamento= np.sort(data['DEPARTAMENTO'].dropna().unique())
+opcion_departamento = st.selectbox('Selecciona un departamento:', departamento)
+data_departamentos = data[data['DEPARTAMENTO'] == opcion_departamento]
+#num_filas= len(data_departamentos.axes[0])
+
+#Crear un selector de provincia:
+provincia= np.sort(data_departamentos['PROVINCIA'].dropna().unique())
+opcion_provincia = st.selectbox('Selecciona una provincia:', provincia)
+data_provincia = data_departamentos[data_departamentos['PROVINCIA']==opcion_provincia]
+#num_filas= len(data_provincia.axes[0])
+
+#Crear un selector de distritos:
+distrito= np.sort(data_departamentos['DISTRITO'].dropna().unique())
+opcion_distrito = st.selectbox('Selecciona una distrito:', distrito)
+data_distrito = data_departamentos[data_departamentos['DISTRITO']==opcion_distrito]
+#num_filas= len(data_distrito.axes[0])
+
+#st.write('Numero de registros:', num_filas)
+
+
+#Crear graficas de SEXO y EDAD
+data_sexo = data_distrito.SEXO.value_counts()
+st.write('Distribución por SEXO: ')
+st.bar_chart(data_sexo)
+
+data_edad = data_distrito.EDAD_DECLARADA.value_counts()
+st.write('Distribución por EDAD: ')
+st.bar_chart(data_edad)
+
+
+#departamento= np.sort(data['DEPARTAMENTO'].dropna().unique())
+edad= data['EDAD_DECLARADA']
+
+#edad= np.sort(data['EDAD_DECLARADA'].dropna().unique())
+#sexo= np.sort(data['SEXO'].dropna().unique())
+
+#Crear slider de edad:
+edad_selector = st.slider('Edad del fallecido: ',
+                         min_value = min(edad),
+                         max_value = max(edad),
+                         value = (min(edad), max(edad)))
+
+
+
+#SELECCIÓN DE CRITERIOS
+criterio = data['CLASIFICACION_DEF'].unique()
+option_criterio = st.selectbox('Lista de fallecidos según el criterio ' , criterio)
+
+departamento_selector = st.multiselect(
+                                        'Departamento: ',
+                                        departamento,
+                                        default = departamento
 )
 
-st.markdown("<h1 style='text-align: center; color: black;'>Geographic Data</h1>", unsafe_allow_html=True)
-st.markdown("<h1 style='text-align: center; color: black;'>Dataset of Vehicle Collisions</h1>", unsafe_allow_html=True)
-st.markdown('<style>h2{color: blue; text-align:center;}</style>', unsafe_allow_html=True)
+filtro = (data['EDAD_DECLARADA'].between(*edad_selector))&(data['DEPARTAMENTO'].isin(departamento_selector))
 
 
-@st.cache(persist=True)
-def load_data(nrows):
-    data = pd.read_csv(DATA_URL, nrows=nrows, parse_dates=[["CRASH DATE", "CRASH TIME"]])
-    data.dropna(subset=["LATITUDE", "LONGITUDE"], inplace=True)
-    data.drop(data[data['LATITUDE'] == 0].index, inplace=True)
-    lowercase = lambda x: str(x).lower()
-    data.rename(lowercase, axis='columns', inplace=True)
-    data.rename(columns={'crash date_crash time': 'date/time'}, inplace=True)
-    data.rename(columns={'number of persons injured': 'injured_persons'}, inplace=True)
-    data.rename(columns={'number of pedestrians injured': 'injured_pedestrians'}, inplace=True)
-    data.rename(columns={'number of cyclist injured': 'injured_cyclists'}, inplace=True)
-    data.rename(columns={'number of motorist injured': 'injured_motorists'}, inplace=True)
-    return data
+#GRAFICO DE BARRAS DE LOS CRITERIOS
+df_criterios = data[data['CLASIFICACION_DEF'] == option_criterio]
+df_crit = df_criterios.CLASIFICACION_DEF.value_counts()
+st.write('Distribución por criterios')
+st.bar_chart(df_crit)
 
-data = load_data(600000)
 
-st.sidebar.header("jgamboa")
-st.header("Number of Injured Person x Collision")
+df_crits = data.groupby(['CLASIFICACION_DEF'], as_index = False)[['DEPARTAMENTO']+['PROVINCIA']+['DISTRITO']].count() 
 
-st.sidebar.header("Filter Parameters")
-st.sidebar.header("where are most people injure?")
-#injured_people = st.sidebar.slider("# Person injured in Collisions", 0, 9)
-injured_people = st.sidebar.number_input("Number Person injured in Collisions", step=1, min_value=0, max_value=9, value=1)
-st.map(data.query('injured_persons > @injured_people')[["latitude", "longitude"]].dropna(how="any"))
+#GRAFICO CIRCULAR DE LOS CRITERIOS
 
-st.sidebar.header("How many collision occur during a given time of day?")
-hour = st.sidebar.number_input("Insert TIME-HOUR", step=1, min_value=0, max_value=24, value=1)
+pie_chart = px.pie(df_crits, #tomo el dataframe
+                   title = 'Lista de fallecidos según el criterio', #Titulo
+                   values = 'DEPARTAMENTO',#columna
+                   names = 'CLASIFICACION_DEF') #
 
-data = data[data['date/time'].dt.hour == hour]
-st.header("Vehicle Collision between %i:00 and %i:00" % (hour, (hour + 1) % 24))
+st.plotly_chart(pie_chart) # de esta forma se va a mostrar el dataframe en Streamlit
 
-midpoint = (np.average(data["latitude"]), np.average(data["longitude"]))
-st.write(pdk.Deck(
-    map_style="mapbox://styles/mapbox/light-v9",
-    initial_view_state={
-        "latitude": midpoint[0],
-        "longitude": midpoint[1],
-        "zoom": 11,
-        "pitch": 50,
+#CUANTO FALLECIDOS HAY
+st.subheader('Fallecidos por COVID-19:')
+st.code(data["SEXO"].value_counts())
 
-    },
-    layers=[
-        pdk.Layer(
-            "HexagonLayer",
-            data=data[['date/time', 'latitude', 'longitude']],
-            get_position=["longitude", "latitude"],
-            auto_highlight=True,
-            radius=100,
-            extruded=True,
-            pickable=True,
-            elevation_scale=4,
-            elevation_range=[0, 1000],
-        ),
-    ],
-))
 
-st.header("Histogram by minute between %i:00 and %i:00" % (hour, (hour + 1) % 24))
-filtered = data[
-    (data['date/time'].dt.hour >= hour) & (data['date/time'].dt.hour < (hour + 1))
-    ]
+fecha= np.sort(data['FECHA_FALLECIMIENTO'].dropna().unique())
+st.header(f"Filtros segun fechas")
 
-hist = np.histogram(filtered['date/time'].dt.minute, bins=60, range=(0, 60))[0]
-chart_data = pd.DataFrame({"minute": range(60), "crashes": hist})
+#SACAMOS LA FECHA MINIMA Y MÁXIMA PARA EL SLIDER
+#fecha_min = st.write(data["FECHA_FALLECIMIENTO"].min())
+#fecha_max = st.write(data["FECHA_FALLECIMIENTO"].max())
 
-fig = px.bar(chart_data, x='minute', y='crashes', hover_data=['minute', 'crashes'], height=400)
-st.write(fig)
+opcion_fecha = st.slider(
+    "Seleccione la fecha: ",
+    min_value = datetime(2020,3,3),
+    max_value = datetime(2022,11,19),
+    value = (datetime(2020,3,3), datetime(2022,11,19)),
 
-st.sidebar.header("Dangerous streets")
-st.header("List Most injured people x Street")
-select = st.sidebar.selectbox('Affected type of person', ['Pedestrians', 'Cyclist', 'Motorists'])
+    format="DD/MM/YYYY")
+date_var = (data["FECHA_FALLECIMIENTO"].between(*opcion_fecha))
+numero_resultados = data[date_var].shape[0] ##number of availables rows
+st.markdown(f'*Resultados Disponibles: {numero_resultados}*') # sale como un titulo que dice cuantos resultados tiene para ese filtro
 
-if select == 'Pedestrians':
-    st.write(data.query("injured_pedestrians >= 1")[["on street name", "injured_pedestrians"]].sort_values(
-        by=['injured_pedestrians'], ascending=False).dropna(how="any")[:7])
 
-elif select == 'Cyclists':
-    st.write(
-        data.query("injured_cyclists >= 1")[["on street name", "injured_cyclists"]].sort_values(
-            by=['injured_cyclists'], ascending=False).dropna(how="any")[:7])
 
-else:
-    st.write(data.query("injured_motorists >= 1")[["on street name", "injured_motorists"]].sort_values(
-        by=['injured_motorists'], ascending=False).dropna(how="any")[:7])
+#MAPA 
 
-if st.checkbox("Show Data", False):
-    st.subheader('Raw Data')
-    st.write(data)
 
-st.sidebar.markdown("libraries used: **streamlit**, **pandas**, **numpy**, **pydeck**, **plotly**")
-st.sidebar.markdown("**Dataset:** Rows: 1.69M  Columns: 29")
-st.sidebar.markdown("Update: June 26, 2020")
+@st.experimental_memo
+def download_data():
+    #https://drive.google.com/uc?id=YOURFILEID/
+    url = "https://drive.google.com/uc?id=10b-uWf6Io0wo3gbSSDcCjSpCIr6xwLOB"
+    output = 'TB_UBIGEOS.csv'
+    gdown.download(url,output,quiet = False)
+
+download_data()
+
+df_ubigeos = pd.read_csv('TB_UBIGEOS.csv', sep = ',')
+#st.write(df_ubigeos)
+#df = df_ubigeos[['longitud', 'latitud']]
+#daf1=data2.rename({ 'longitud': 'lon' , 'latitud' : 'lat'})
+#st.write(daf1)
+#data.merge(df_ubigeos)
+ #data = data.drop(columns=["FECHA_CORTE",
+ # "FECHA_FALLECIMIENTO", "CLASIFICACION_DEF", "UBIGEO", "UUID"])
+ 
+#UNIMOS AMBOS DATASETS
+data['UBIGEO']= data.UBIGEO.astype(str)
+df_ubigeos['ubigeo_inei']= df_ubigeos['ubigeo_inei'].astype(str)
+df_ubigeos = df_ubigeos.rename(columns={"ubigeo_inei": "UBIGEO"})
+#st.write(df_ubigeos)
+data1= data.merge(df_ubigeos, on="UBIGEO")
+st.write(data1)
+#data1.rename(columns={"latitud":"lat","longitud":"lon"}, inplace=True)
+#st.map(data1)
+
+st.title("Mapa")
+
+name_bott = ["Ver Mapa", "Ocultar Mapa"]
+name = st.radio('Visualizar',name_bott,index=1)
+
+
+if name == "Ver Mapa":
+    data1.rename(columns={"latitud":"lat","longitud":"lon"}, inplace=True)
+    st.map(data1)
+
+
+
